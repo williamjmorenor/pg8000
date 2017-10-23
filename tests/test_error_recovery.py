@@ -1,6 +1,6 @@
 import unittest
 import pg8000
-from .connection_settings import db_connect
+from connection_settings import db_connect
 import warnings
 import datetime
 from sys import exc_info
@@ -76,6 +76,7 @@ class Tests(unittest.TestCase):
             self.assertEqual(str(e), 'connection is closed')
 
         warnings.resetwarnings()
+
 
 if __name__ == "__main__":
     unittest.main()

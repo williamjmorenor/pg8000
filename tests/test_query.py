@@ -1,7 +1,6 @@
 import unittest
-import threading
 import pg8000
-from .connection_settings import db_connect
+from connection_settings import db_connect
 from six import u
 from sys import exc_info
 import datetime
@@ -89,7 +88,7 @@ class Tests(unittest.TestCase):
             c1, c2 = self.db.cursor(), self.db.cursor()
             c1count, c2count = 0, 0
             q = "select * from generate_series(1, %s)"
-            params = (self.db._row_cache_size + 1,)
+            params = (100,)
             c1.execute(q, params)
             c2.execute(q, params)
             for c2row in c2:
@@ -102,21 +101,6 @@ class Tests(unittest.TestCase):
             self.db.rollback()
 
         self.assertEqual(c1count, c2count)
-
-    # Test query works if the number of rows returned is exactly the same as
-    # the size of the row cache
-
-    def testQuerySizeCache(self):
-        try:
-            cursor = self.db.cursor()
-            cursor.execute(
-                "select * from generate_series(1, %s)",
-                (self.db._row_cache_size,))
-            for row in cursor:
-                pass
-        finally:
-            cursor.close()
-            self.db.rollback()
 
     # Run a query on a table, alter the structure of the table, then run the
     # original query again.
@@ -169,30 +153,6 @@ class Tests(unittest.TestCase):
             self.assertEqual(cursor.rowcount, 3)
             ids = tuple([x[0] for x in cursor])
             self.assertEqual(len(ids), 3)
-        finally:
-            cursor.close()
-            self.db.rollback()
-
-    def testMultithreadedCursor(self):
-        try:
-            cursor = self.db.cursor()
-            # Note: Multithreading with a cursor is not highly recommended due
-            # to low performance.
-
-            def test(left, right):
-                for i in range(left, right):
-                    cursor.execute(
-                        "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
-                        (i, id(threading.currentThread()), None))
-            t1 = threading.Thread(target=test, args=(1, 25))
-            t2 = threading.Thread(target=test, args=(25, 50))
-            t3 = threading.Thread(target=test, args=(50, 75))
-            t1.start()
-            t2.start()
-            t3.start()
-            t1.join()
-            t2.join()
-            t3.join()
         finally:
             cursor.close()
             self.db.rollback()
@@ -363,6 +323,51 @@ class Tests(unittest.TestCase):
             self.assertRaises(pg8000.ProgrammingError, cursor.execute, "")
         finally:
             cursor.close()
+
+    # rolling back when not in a transaction doesn't generate a warning
+    def test_rollback_no_transaction(self):
+        try:
+            # Remove any existing notices
+            self.db.notices.clear()
+
+            cursor = self.db.cursor()
+
+            # First, verify that a raw rollback does produce a notice
+            self.db.execute(cursor, "rollback", None)
+
+            self.assertEqual(1, len(self.db.notices))
+            # 25P01 is the code for no_active_sql_tronsaction. It has
+            # a message and severity name, but those might be
+            # localized/depend on the server version.
+            self.assertEqual(self.db.notices.pop().get(b'C'), b'25P01')
+
+            # Now going through the rollback method doesn't produce
+            # any notices because it knows we're not in a transaction.
+            self.db.rollback()
+
+            self.assertEqual(0, len(self.db.notices))
+
+        finally:
+            cursor.close()
+
+    def test_context_manager_class(self):
+        self.assertTrue('__enter__' in pg8000.core.Cursor.__dict__)
+        self.assertTrue('__exit__' in pg8000.core.Cursor.__dict__)
+
+        with self.db.cursor() as cursor:
+            cursor.execute('select 1')
+
+    def test_deallocate_prepared_statements(self):
+        try:
+            cursor = self.db.cursor()
+            cursor.execute("select * from t1")
+            cursor.execute("alter table t1 drop column f3")
+            cursor.execute("select count(*) from pg_prepared_statements")
+            res = cursor.fetchall()
+            self.assertEqual(res[0][0], 1)
+        finally:
+            cursor.close()
+            self.db.rollback()
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,7 +3,7 @@ import pg8000
 import datetime
 import decimal
 import struct
-from .connection_settings import db_connect
+from connection_settings import db_connect
 from six import b, PY2, u
 import uuid
 import os
@@ -33,9 +33,10 @@ class Tests(unittest.TestCase):
         self.assertEqual(retval[0][0], datetime.time(4, 5, 6))
 
     def testDateRoundtrip(self):
-        self.cursor.execute("SELECT %s as f1", (datetime.date(2001, 2, 3),))
+        v = datetime.date(2001, 2, 3)
+        self.cursor.execute("SELECT %s as f1", (v,))
         retval = self.cursor.fetchall()
-        self.assertEqual(retval[0][0], datetime.date(2001, 2, 3))
+        self.assertEqual(retval[0][0], v)
 
     def testBoolRoundtrip(self):
         self.cursor.execute("SELECT %s as f1", (True,))
@@ -85,6 +86,12 @@ class Tests(unittest.TestCase):
         bin_new = struct.pack("!d", retval[0][0])
         self.assertEqual(bin_new, bin_orig)
 
+    def test_float_plus_infinity_roundtrip(self):
+        v = float('inf')
+        self.cursor.execute("SELECT %s as f1", (v,))
+        retval = self.cursor.fetchall()
+        self.assertEqual(retval[0][0], v)
+
     def testStrRoundtrip(self):
         v = "hello world"
         self.cursor.execute(
@@ -119,12 +126,12 @@ class Tests(unittest.TestCase):
 
     def testLongRoundtrip(self):
         self.cursor.execute(
-            "SELECT cast(%s as bigint)", (50000000000000,))
+            "SELECT %s", (50000000000000,))
         retval = self.cursor.fetchall()
         self.assertEqual(retval[0][0], 50000000000000)
 
     def testIntExecuteMany(self):
-        self.cursor.executemany("SELECT cast(%s as integer)", ((1,), (40000,)))
+        self.cursor.executemany("SELECT %s", ((1,), (40000,)))
         self.cursor.fetchall()
 
         v = ([None], [4])
@@ -141,20 +148,20 @@ class Tests(unittest.TestCase):
         int8 = 20
 
         test_values = [
-            (0, int2, 'smallint'),
-            (-32767, int2, 'smallint'),
-            (-32768, int4, 'integer'),
-            (+32767, int2, 'smallint'),
-            (+32768, int4, 'integer'),
-            (-2147483647, int4, 'integer'),
-            (-2147483648, int8, 'bigint'),
-            (+2147483647, int4, 'integer'),
-            (+2147483648, int8, 'bigint'),
-            (-9223372036854775807, int8, 'bigint'),
-            (+9223372036854775807, int8, 'bigint'), ]
+            (0, int2),
+            (-32767, int2),
+            (-32768, int4),
+            (+32767, int2),
+            (+32768, int4),
+            (-2147483647, int4),
+            (-2147483648, int8),
+            (+2147483647, int4),
+            (+2147483648, int8),
+            (-9223372036854775807, int8),
+            (+9223372036854775807, int8)]
 
-        for value, typoid, tp in test_values:
-            self.cursor.execute("SELECT cast(%s as " + tp + ")", (value,))
+        for value, typoid in test_values:
+            self.cursor.execute("SELECT %s", (value,))
             retval = self.cursor.fetchall()
             self.assertEqual(retval[0][0], value)
             column_name, column_typeoid = self.cursor.description[0][0:2]
@@ -592,11 +599,11 @@ class Tests(unittest.TestCase):
             retval = self.cursor.fetchall()
             self.assertEqual(retval[0][0], v)
 
-    def testArrayHasValue(self):
-        self.assertRaises(
-            pg8000.ArrayContentEmptyError,
-            self.db.array_inspect, [[None], [None], [None]])
-        self.db.rollback()
+    def testEmptyArray(self):
+        v = []
+        self.cursor.execute("SELECT %s as f1", (v,))
+        retval = self.cursor.fetchall()
+        self.assertEqual(retval[0][0], v)
 
     def testArrayContentNotSupported(self):
         class Kajigger(object):
@@ -666,10 +673,49 @@ class Tests(unittest.TestCase):
             retval = self.cursor.fetchall()
             self.assertEqual(retval[0][0], val)
 
+    def test_json_access_object(self):
+        if self.db._server_version >= LooseVersion('9.4'):
+            val = {'name': 'Apollo 11 Cave', 'zebra': True, 'age': 26.003}
+            self.cursor.execute(
+                "SELECT cast(%s as json) -> %s", (json.dumps(val), 'name'))
+            retval = self.cursor.fetchall()
+            self.assertEqual(retval[0][0], 'Apollo 11 Cave')
+
+    def test_jsonb_access_object(self):
+        if self.db._server_version >= LooseVersion('9.4'):
+            val = {'name': 'Apollo 11 Cave', 'zebra': True, 'age': 26.003}
+            self.cursor.execute(
+                "SELECT cast(%s as jsonb) -> %s", (json.dumps(val), 'name'))
+            retval = self.cursor.fetchall()
+            self.assertEqual(retval[0][0], 'Apollo 11 Cave')
+
+    def test_json_access_array(self):
+        if self.db._server_version >= LooseVersion('9.4'):
+            val = [-1, -2, -3, -4, -5]
+            self.cursor.execute(
+                "SELECT cast(%s as json) -> %s", (json.dumps(val), 2))
+            retval = self.cursor.fetchall()
+            self.assertEqual(retval[0][0], -3)
+
+    def testJsonbAccessArray(self):
+        if self.db._server_version >= LooseVersion('9.4'):
+            val = [-1, -2, -3, -4, -5]
+            self.cursor.execute(
+                "SELECT cast(%s as jsonb) -> %s", (json.dumps(val), 2))
+            retval = self.cursor.fetchall()
+            self.assertEqual(retval[0][0], -3)
+
     def test_timestamp_send_float(self):
         assert b('A\xbe\x19\xcf\x80\x00\x00\x00') == \
             pg8000.core.timestamp_send_float(
                 datetime.datetime(2016, 1, 2, 0, 0))
+
+    def test_infinity_timestamp_roundtrip(self):
+        v = 'infinity'
+        self.cursor.execute("SELECT cast(%s as timestamp) as f1", (v,))
+        retval = self.cursor.fetchall()
+        self.assertEqual(retval[0][0], v)
+
 
 if __name__ == "__main__":
     unittest.main()

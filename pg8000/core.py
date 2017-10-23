@@ -1,25 +1,26 @@
-import datetime
-from datetime import timedelta
+from datetime import (
+    timedelta as Timedelta, datetime as Datetime, tzinfo, date, time)
 from warnings import warn
 import socket
-import threading
 from struct import pack
 from hashlib import md5
 from decimal import Decimal
-from collections import deque, defaultdict
+from collections import deque, defaultdict, OrderedDict
 from itertools import count, islice
 from six.moves import map
-from six import b, PY2, integer_types, next, text_type, u, binary_type
+from six import (
+    b, PY2, integer_types, next, text_type, u, binary_type, itervalues)
 from uuid import UUID
 from copy import deepcopy
 from calendar import timegm
-import os
 from distutils.version import LooseVersion
 from struct import Struct
-import time
+from time import localtime
 import pg8000
+from json import loads
 
 # Copyright (c) 2007-2009, Mathieu Fenniak
+# Copyright (c) The Contributors
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -49,16 +50,10 @@ import pg8000
 __author__ = "Mathieu Fenniak"
 
 
-try:
-    from json import loads
-except ImportError:
-    pass  # Can only use JSON with Python 2.6 and above
+ZERO = Timedelta(0)
 
 
-ZERO = timedelta(0)
-
-
-class UTC(datetime.tzinfo):
+class UTC(tzinfo):
 
     def utcoffset(self, dt):
         return ZERO
@@ -68,6 +63,7 @@ class UTC(datetime.tzinfo):
 
     def dst(self, dt):
         return ZERO
+
 
 utc = UTC()
 
@@ -160,6 +156,7 @@ def pack_funcs(fmt):
     struc = Struct('!' + fmt)
     return struc.pack, struc.unpack_from
 
+
 i_pack, i_unpack = pack_funcs('i')
 h_pack, h_unpack = pack_funcs('h')
 q_pack, q_unpack = pack_funcs('q')
@@ -173,9 +170,6 @@ ihihih_pack, ihihih_unpack = pack_funcs('ihihih')
 ci_pack, ci_unpack = pack_funcs('ci')
 bh_pack, bh_unpack = pack_funcs('bh')
 cccc_pack, cccc_unpack = pack_funcs('cccc')
-
-
-Struct('!i')
 
 
 min_int2, max_int2 = -2 ** 15, 2 ** 15
@@ -306,13 +300,6 @@ class ArrayContentNotHomogenousError(ProgrammingError):
     pass
 
 
-class ArrayContentEmptyError(ProgrammingError):
-    """Raised when attempting to transmit an empty array. The type oid of an
-    empty array cannot be determined, and so sending them is not permitted.
-    """
-    pass
-
-
 class ArrayDimensionsNotConsistentError(ProgrammingError):
     """
     Raised when attempting to transmit an array that has inconsistent
@@ -337,7 +324,7 @@ def Date(year, month, day):
 
     :rtype: :class:`datetime.date`
     """
-    return datetime.date(year, month, day)
+    return date(year, month, day)
 
 
 def Time(hour, minute, second):
@@ -348,7 +335,7 @@ def Time(hour, minute, second):
 
     :rtype: :class:`datetime.time`
     """
-    return datetime.time(hour, minute, second)
+    return time(hour, minute, second)
 
 
 def Timestamp(year, month, day, hour, minute, second):
@@ -359,7 +346,7 @@ def Timestamp(year, month, day, hour, minute, second):
 
     :rtype: :class:`datetime.datetime`
     """
-    return datetime.datetime(year, month, day, hour, minute, second)
+    return Datetime(year, month, day, hour, minute, second)
 
 
 def DateFromTicks(ticks):
@@ -371,7 +358,7 @@ def DateFromTicks(ticks):
 
     :rtype: :class:`datetime.date`
     """
-    return Date(*time.localtime(ticks)[:3])
+    return Date(*localtime(ticks)[:3])
 
 
 def TimeFromTicks(ticks):
@@ -383,7 +370,7 @@ def TimeFromTicks(ticks):
 
     :rtype: :class:`datetime.time`
     """
-    return Time(*time.localtime(ticks)[3:6])
+    return Time(*localtime(ticks)[3:6])
 
 
 def TimestampFromTicks(ticks):
@@ -395,7 +382,7 @@ def TimestampFromTicks(ticks):
 
     :rtype: :class:`datetime.datetime`
     """
-    return Timestamp(*time.localtime(ticks)[:6])
+    return Timestamp(*localtime(ticks)[:6])
 
 
 def Binary(value):
@@ -410,6 +397,7 @@ def Binary(value):
         return Bytea(value)
     else:
         return value
+
 
 if PY2:
     BINARY = Bytea
@@ -498,18 +486,6 @@ def convert_paramstyle(style, query):
                         in_quote_escape = True
                     else:
                         state = OUTSIDE
-            elif style in ("pyformat", "format") and c == "%":
-                # hm... we're only going to support an escaped percent sign
-                if in_param_escape:
-                    in_param_escape = False
-                    output_query.append(c)
-                else:
-                    if next_c == "%":
-                        in_param_escape = True
-                    else:
-                        raise InterfaceError(
-                            "'%" + next_c + "' not supported in a quoted "
-                            "string within the query string")
             else:
                 output_query.append(c)
 
@@ -517,18 +493,6 @@ def convert_paramstyle(style, query):
             if c == '"':
                 state = OUTSIDE
                 output_query.append(c)
-            elif style in ("pyformat", "format") and c == "%":
-                # hm... we're only going to support an escaped percent sign
-                if in_param_escape:
-                    in_param_escape = False
-                    output_query.append(c)
-                else:
-                    if next_c == "%":
-                        in_param_escape = True
-                    else:
-                        raise InterfaceError(
-                            "'%" + next_c + "' not supported in a quoted "
-                            "string within the query string")
             else:
                 output_query.append(c)
 
@@ -537,18 +501,6 @@ def convert_paramstyle(style, query):
                 # check for escaped single-quote
                 output_query.append(c)
                 state = OUTSIDE
-            elif style in ("pyformat", "format") and c == "%":
-                # hm... we're only going to support an escaped percent sign
-                if in_param_escape:
-                    in_param_escape = False
-                    output_query.append(c)
-                else:
-                    if next_c == "%":
-                        in_param_escape = True
-                    else:
-                        raise InterfaceError(
-                            "'%" + next_c + "' not supported in a quoted "
-                            "string within the query string.")
             else:
                 output_query.append(c)
 
@@ -591,11 +543,9 @@ def convert_paramstyle(style, query):
     return ''.join(output_query), make_args
 
 
-EPOCH = datetime.datetime(2000, 1, 1)
+EPOCH = Datetime(2000, 1, 1)
 EPOCH_TZ = EPOCH.replace(tzinfo=utc)
 EPOCH_SECONDS = timegm(EPOCH.timetuple())
-utcfromtimestamp = datetime.datetime.utcfromtimestamp
-
 INFINITY_MICROSECONDS = 2 ** 63 - 1
 MINUS_INFINITY_MICROSECONDS = -1 * INFINITY_MICROSECONDS - 1
 
@@ -604,31 +554,25 @@ MINUS_INFINITY_MICROSECONDS = -1 * INFINITY_MICROSECONDS - 1
 def timestamp_recv_integer(data, offset, length):
     micros = q_unpack(data, offset)[0]
     try:
-        return EPOCH + timedelta(microseconds=micros)
-    except OverflowError as e:
+        return EPOCH + Timedelta(microseconds=micros)
+    except OverflowError:
         if micros == INFINITY_MICROSECONDS:
-            return datetime.datetime.max
+            return 'infinity'
         elif micros == MINUS_INFINITY_MICROSECONDS:
-            return datetime.datetime.min
+            return '-infinity'
         else:
-            raise e
+            return micros
 
 
 # data is double-precision float representing seconds since 2000-01-01
 def timestamp_recv_float(data, offset, length):
-    return utcfromtimestamp(EPOCH_SECONDS + d_unpack(data, offset)[0])
+    return Datetime.utcfromtimestamp(EPOCH_SECONDS + d_unpack(data, offset)[0])
 
 
 # data is 64-bit integer representing microseconds since 2000-01-01
 def timestamp_send_integer(v):
-    if v == datetime.datetime.max:
-        micros = INFINITY_MICROSECONDS
-    elif v == datetime.datetime.min:
-        micros = MINUS_INFINITY_MICROSECONDS
-    else:
-        micros = int(
-            (timegm(v.timetuple()) - EPOCH_SECONDS) * 1e6) + v.microsecond
-    return q_pack(micros)
+    return q_pack(
+        int((timegm(v.timetuple()) - EPOCH_SECONDS) * 1e6) + v.microsecond)
 
 
 # data is double-precision float representing seconds since 2000-01-01
@@ -647,9 +591,6 @@ def timestamptz_send_float(v):
     # convert them.
     return timestamp_send_float(v.astimezone(utc).replace(tzinfo=None))
 
-DATETIME_MAX_TZ = datetime.datetime.max.replace(tzinfo=utc)
-DATETIME_MIN_TZ = datetime.datetime.min.replace(tzinfo=utc)
-
 
 # return a timezone-aware datetime instance if we're reading from a
 # "timestamp with timezone" type.  The timezone returned will always be
@@ -658,14 +599,14 @@ DATETIME_MIN_TZ = datetime.datetime.min.replace(tzinfo=utc)
 def timestamptz_recv_integer(data, offset, length):
     micros = q_unpack(data, offset)[0]
     try:
-        return EPOCH_TZ + timedelta(microseconds=micros)
-    except OverflowError as e:
+        return EPOCH_TZ + Timedelta(microseconds=micros)
+    except OverflowError:
         if micros == INFINITY_MICROSECONDS:
-            return DATETIME_MAX_TZ
+            return 'infinity'
         elif micros == MINUS_INFINITY_MICROSECONDS:
-            return DATETIME_MIN_TZ
+            return '-infinity'
         else:
-            raise e
+            return micros
 
 
 def timestamptz_recv_float(data, offset, length):
@@ -706,7 +647,7 @@ def interval_recv_integer(data, offset, length):
     microseconds, days, months = qii_unpack(data, offset)
     if months == 0:
         seconds, micros = divmod(microseconds, 1e6)
-        return datetime.timedelta(days, seconds, micros)
+        return Timedelta(days, seconds, micros)
     else:
         return Interval(microseconds, days, months)
 
@@ -715,7 +656,7 @@ def interval_recv_float(data, offset, length):
     seconds, days, months = dii_unpack(data, offset)
     if months == 0:
         secs, microseconds = divmod(seconds, 1e6)
-        return datetime.timedelta(days, secs, microseconds)
+        return Timedelta(days, secs, microseconds)
     else:
         return Interval(int(seconds * 1000 * 1000), days, months)
 
@@ -742,6 +683,7 @@ def float8_recv(data, offset, length):
 
 def bytea_send(v):
     return v
+
 
 # bytea
 if PY2:
@@ -840,8 +782,12 @@ class Cursor():
         self.ps = None
         self._row_count = -1
         self._cached_rows = deque()
-        self.portal_name = None
-        self.portal_suspended = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
 
     @property
     def connection(self):
@@ -899,12 +845,11 @@ class Cursor():
             .. versionadded:: 1.9.11
         """
         try:
-            with self._c._lock:
-                self.stream = stream
+            self.stream = stream
 
-                if not self._c.in_transaction and not self._c.autocommit:
-                    self._c.execute(self, "begin transaction", None)
-                self._c.execute(self, operation, args)
+            if not self._c.in_transaction and not self._c.autocommit:
+                self._c.execute(self, "begin transaction", None)
+            self._c.execute(self, operation, args)
         except AttributeError as e:
             if self._c is None:
                 raise InterfaceError("Cursor closed")
@@ -1022,26 +967,16 @@ class Cursor():
         pass
 
     def __next__(self):
-        with self._c._lock:
-            try:
-                return self._cached_rows.popleft()
-            except IndexError:
-                if self.portal_suspended:
-                    self._c.send_EXECUTE(self)
-                    self._c._write(SYNC_MSG)
-                    self._c._flush()
-                    self._c.handle_messages(self)
-                    if not self.portal_suspended:
-                        self._c.close_portal(self)
-                try:
-                    return self._cached_rows.popleft()
-                except IndexError:
-                    if self.ps is None:
-                        raise ProgrammingError("A query hasn't been issued.")
-                    elif len(self.ps['row_desc']) == 0:
-                        raise ProgrammingError("no result set")
-                    else:
-                        raise StopIteration()
+        try:
+            return self._cached_rows.popleft()
+        except IndexError:
+            if self.ps is None:
+                raise ProgrammingError("A query hasn't been issued.")
+            elif len(self.ps['row_desc']) == 0:
+                raise ProgrammingError("no result set")
+            else:
+                raise StopIteration()
+
 
 if PY2:
     Cursor.next = Cursor.__next__
@@ -1079,10 +1014,16 @@ DESCRIBE = b('D')
 TERMINATE = b('X')
 CLOSE = b('C')
 
-FLUSH_MSG = FLUSH + i_pack(4)
-SYNC_MSG = SYNC + i_pack(4)
-TERMINATE_MSG = TERMINATE + i_pack(4)
-COPY_DONE_MSG = COPY_DONE + i_pack(4)
+
+def create_message(code, data=b('')):
+    return code + i_pack(len(data) + 4) + data
+
+
+FLUSH_MSG = create_message(FLUSH)
+SYNC_MSG = create_message(SYNC)
+TERMINATE_MSG = create_message(TERMINATE)
+COPY_DONE_MSG = create_message(COPY_DONE)
+EXECUTE_MSG = create_message(EXECUTE, NULL_BYTE + i_pack(0))
 
 # DESCRIBE constants
 STATEMENT = b('S')
@@ -1110,87 +1051,7 @@ IDLE_IN_FAILED_TRANSACTION = b("E")
 arr_trans = dict(zip(map(ord, u("[] 'u")), list(u('{}')) + [None] * 3))
 
 
-class MulticastDelegate(object):
-    def __init__(self):
-        self.delegates = []
-
-    def __iadd__(self, delegate):
-        self.add(delegate)
-        return self
-
-    def add(self, delegate):
-        self.delegates.append(delegate)
-
-    def __isub__(self, delegate):
-        self.delegates.remove(delegate)
-        return self
-
-    def __call__(self, *args, **kwargs):
-        for d in self.delegates:
-            d(*args, **kwargs)
-
-
 class Connection(object):
-    """A connection object is returned by the :func:`pg8000.connect` function.
-    It represents a single physical connection to a PostgreSQL database.
-
-    .. attribute:: Connection.notifies
-
-        A list of server-side notifications received by this database
-        connection (via the LISTEN/NOTIFY PostgreSQL commands).  Each list
-        element is a two-element tuple containing the PostgreSQL backend PID
-        that issued the notify, and the notification name.
-
-        PostgreSQL will only send notifications to a client between
-        transactions.  The contents of this property are generally only
-        populated after a commit or rollback of the current transaction.
-
-        This list can be modified by a client application to clean out
-        notifications as they are handled.  However, inspecting or modifying
-        this collection should only be done while holding the
-        :attr:`notifies_lock` lock in order to guarantee thread-safety.
-
-        This attribute is not part of the DBAPI standard; it is a pg8000
-        extension.
-
-        .. versionadded:: 1.07
-
-    .. attribute:: Connection.notifies_lock
-
-        A :class:`threading.Lock` object that should be held to read or
-        modify the contents of the :attr:`notifies` list.
-
-        This attribute is not part of the DBAPI standard; it is a pg8000
-        extension.
-
-        .. versionadded:: 1.07
-
-    .. attribute:: Connection.autocommit
-
-        Following the DB-API specification, autocommit is off by default.
-        It can be turned on by setting this boolean pg8000-specific autocommit
-        property to True.
-
-        .. versionadded:: 1.9
-
-    .. exception:: Connection.Error
-                   Connection.Warning
-                   Connection.InterfaceError
-                   Connection.DatabaseError
-                   Connection.InternalError
-                   Connection.OperationalError
-                   Connection.ProgrammingError
-                   Connection.IntegrityError
-                   Connection.DataError
-                   Connection.NotSupportedError
-
-        All of the standard database exception types are accessible via
-        connection instances.
-
-        This is a DBAPI 2.0 extension.  Accessing any of these attributes will
-        generate the warning ``DB-API extension connection.DatabaseError
-        used``.
-    """
 
     # DBAPI Extension: supply exceptions as attributes on the connection
     Warning = property(lambda self: self._getError(Warning))
@@ -1204,14 +1065,6 @@ class Connection(object):
     NotSupportedError = property(
         lambda self: self._getError(NotSupportedError))
 
-    # Determines the number of rows to read from the database server at once.
-    # Reading more rows increases performance at the cost of memory.  The
-    # default value is 100 rows.  The effect of this parameter is transparent.
-    # That is, the library reads more rows when the cache is empty
-    # automatically.
-    _row_cache_size = 100
-    _row_cache_size_bin = i_pack(_row_cache_size)
-
     def _getError(self, error):
         warn(
             "DB-API extension connection.%s used" %
@@ -1220,37 +1073,34 @@ class Connection(object):
 
     def __init__(
             self, user, host, unix_sock, port, database, password, ssl,
-            timeout):
+            timeout, application_name):
         self._client_encoding = "utf8"
         self._commands_with_count = (
             b("INSERT"), b("DELETE"), b("UPDATE"), b("MOVE"),
             b("FETCH"), b("COPY"), b("SELECT"))
-        self._lock = threading.Lock()
+        self.notifications = deque(maxlen=100)
+        self.notices = deque(maxlen=100)
+        self.parameter_statuses = deque(maxlen=100)
 
         if user is None:
-            try:
-                self.user = os.environ['PGUSER']
-            except KeyError:
-                try:
-                    self.user = os.environ['USER']
-                except KeyError:
-                    raise InterfaceError(
-                        "The 'user' connection parameter was omitted, and "
-                        "neither the PGUSER or USER environment variables "
-                        "were set.")
+            raise InterfaceError(
+                "The 'user' connection parameter cannot be None")
+
+        if isinstance(user, text_type):
+            self.user = user.encode('utf8')
         else:
             self.user = user
 
-        if isinstance(self.user, text_type):
-            self.user = self.user.encode('utf8')
+        if isinstance(password, text_type):
+            self.password = password.encode('utf8')
+        else:
+            self.password = password
 
-        self.password = password
         self.autocommit = False
         self._xid = None
 
         self._caches = defaultdict(lambda: defaultdict(dict))
         self.statement_number = 0
-        self.portal_number = 0
 
         try:
             if unix_sock is None and host is not None:
@@ -1273,21 +1123,20 @@ class Connection(object):
                 self._usock.connect(unix_sock)
 
             if ssl:
-                with self._lock:
-                    try:
-                        import ssl as sslmodule
-                        # Int32(8) - Message length, including self.
-                        # Int32(80877103) - The SSL request code.
-                        self._usock.sendall(ii_pack(8, 80877103))
-                        resp = self._usock.recv(1)
-                        if resp == b('S'):
-                            self._usock = sslmodule.wrap_socket(self._usock)
-                        else:
-                            raise InterfaceError("Server refuses SSL")
-                    except ImportError:
-                        raise InterfaceError(
-                            "SSL required but ssl module not available in "
-                            "this python installation")
+                try:
+                    import ssl as sslmodule
+                    # Int32(8) - Message length, including self.
+                    # Int32(80877103) - The SSL request code.
+                    self._usock.sendall(ii_pack(8, 80877103))
+                    resp = self._usock.recv(1)
+                    if resp == b('S'):
+                        self._usock = sslmodule.wrap_socket(self._usock)
+                    else:
+                        raise InterfaceError("Server refuses SSL")
+                except ImportError:
+                    raise InterfaceError(
+                        "SSL required but ssl module not available in "
+                        "this python installation")
 
             self._sock = self._usock.makefile(mode="rwb")
         except socket.error as e:
@@ -1298,44 +1147,6 @@ class Connection(object):
         self._write = self._sock.write
         self._backend_key_data = None
 
-        ##
-        # An event handler that is fired when the database server issues a
-        # notice.
-        # The value of this property is a MulticastDelegate. A callback
-        # can be added by using connection.NotificationReceived += SomeMethod.
-        # The method will be called with a single argument, an object that has
-        # properties: severity, code, msg, and possibly others (detail, hint,
-        # position, where, file, line, and routine). Callbacks can be removed
-        # with the -= operator.
-        # <p>
-        # Stability: Added in v1.03, stability guaranteed for v1.xx.
-        self.NoticeReceived = MulticastDelegate()
-
-        ##
-        # An event handler that is fired when a runtime configuration option is
-        # changed on the server.  The value of this property is a
-        # MulticastDelegate.  A callback can be added by using
-        # connection.NotificationReceived += SomeMethod. Callbacks can be
-        # removed with the -= operator. The method will be called with a single
-        # argument, an object that has properties "key" and "value".
-        # <p>
-        # Stability: Added in v1.03, stability guaranteed for v1.xx.
-        self.ParameterStatusReceived = MulticastDelegate()
-
-        ##
-        # An event handler that is fired when NOTIFY occurs for a notification
-        # that has been LISTEN'd for.  The value of this property is a
-        # MulticastDelegate.  A callback can be added by using
-        # connection.NotificationReceived += SomeMethod. The method will be
-        # called with a single argument, an object that has properties:
-        # backend_pid, condition, and additional_info. Callbacks can be
-        # removed with the -= operator.
-        # <p>
-        # Stability: Added in v1.03, stability guaranteed for v1.xx.
-        self.NotificationReceived = MulticastDelegate()
-
-        self.ParameterStatusReceived += self.handle_PARAMETER_STATUS
-
         def text_out(v):
             return v.encode(self._client_encoding)
 
@@ -1343,12 +1154,7 @@ class Connection(object):
             return v.isoformat().encode(self._client_encoding)
 
         def date_out(v):
-            if v == datetime.date.max:
-                return 'infinity'.encode(self._client_encoding)
-            elif v == datetime.date.min:
-                return '-infinity'.encode(self._client_encoding)
-            else:
-                return v.isoformat().encode(self._client_encoding)
+            return v.isoformat().encode(self._client_encoding)
 
         def unknown_out(v):
             return str(v).encode(self._client_encoding)
@@ -1436,19 +1242,15 @@ class Connection(object):
             minute = int(data[offset + 3:offset + 5])
             sec = Decimal(
                 data[offset + 6:offset + length].decode(self._client_encoding))
-            return datetime.time(
+            return time(
                 hour, minute, int(sec), int((sec - int(sec)) * 1000000))
 
         def date_in(data, offset, length):
-            year_str = data[offset:offset + 4].decode(self._client_encoding)
-            if year_str == 'infi':
-                return datetime.date.max
-            elif year_str == '-inf':
-                return datetime.date.min
-            else:
-                return datetime.date(
-                    int(year_str), int(data[offset + 5:offset + 7]),
-                    int(data[offset + 8:offset + 10]))
+            d = data[offset:offset+length].decode(self._client_encoding)
+            try:
+                return date(int(d[:4]), int(d[5:7]), int(d[8:10]))
+            except ValueError:
+                return d
 
         def numeric_in(data, offset, length):
             return Decimal(
@@ -1502,31 +1304,32 @@ class Connection(object):
         self.py_types = {
             type(None): (-1, FC_BINARY, null_send),  # null
             bool: (16, FC_BINARY, bool_send),
-            int: (705, FC_TEXT, unknown_out),
+            20: (20, FC_BINARY, q_pack),  # int8
+            21: (21, FC_BINARY, h_pack),  # int2
+            23: (23, FC_BINARY, i_pack),  # int4
             float: (701, FC_BINARY, d_pack),  # float8
-            datetime.date: (1082, FC_TEXT, date_out),  # date
-            datetime.time: (1083, FC_TEXT, time_out),  # time
+            date: (1082, FC_TEXT, date_out),  # date
+            time: (1083, FC_TEXT, time_out),  # time
             1114: (1114, FC_BINARY, timestamp_send_integer),  # timestamp
             # timestamp w/ tz
             1184: (1184, FC_BINARY, timestamptz_send_integer),
-            datetime.timedelta: (1186, FC_BINARY, interval_send_integer),
+            Timedelta: (1186, FC_BINARY, interval_send_integer),
             Interval: (1186, FC_BINARY, interval_send_integer),
             Decimal: (1700, FC_TEXT, numeric_out),  # Decimal
-            UUID: (2950, FC_BINARY, uuid_send),  # uuid
-        }
+            UUID: (2950, FC_BINARY, uuid_send)}  # uuid
 
         self.inspect_funcs = {
-            datetime.datetime: self.inspect_datetime,
+            Datetime: self.inspect_datetime,
             list: self.array_inspect,
             tuple: self.array_inspect,
-        }
+            int: self.inspect_int}
 
         if PY2:
             self.py_types[Bytea] = (17, FC_BINARY, bytea_send)  # bytea
             self.py_types[text_type] = (705, FC_TEXT, text_out)  # unknown
             self.py_types[str] = (705, FC_TEXT, bytea_send)  # unknown
 
-            self.py_types[long] = (705, FC_TEXT, unknown_out)  # noqa
+            self.inspect_funcs[long] = self.inspect_int  # noqa
         else:
             self.py_types[bytes] = (17, FC_BINARY, bytea_send)  # bytea
             self.py_types[str] = (705, FC_TEXT, text_out)  # unknown
@@ -1590,40 +1393,35 @@ class Connection(object):
             if isinstance(database, text_type):
                 database = database.encode('utf8')
             val.extend(b("database\x00") + database + NULL_BYTE)
+        if application_name is not None:
+            if isinstance(application_name, text_type):
+                application_name = application_name.encode('utf8')
+            val.extend(
+                b("application_name\x00") + application_name + NULL_BYTE)
         val.append(0)
         self._write(i_pack(len(val) + 4))
         self._write(val)
         self._flush()
 
         self._cursor = self.cursor()
-        with self._lock:
-            try:
-                code = self.error = None
-                while code not in (READY_FOR_QUERY, ERROR_RESPONSE):
-                    code, data_len = ci_unpack(self._read(5))
-                    self.message_types[code](self._read(data_len - 4), None)
-                if self.error is not None:
-                    raise self.error
-            except Exception as e:
-                try:
-                    self._close()
-                except Exception:
-                    pass
-                raise e
+        code = self.error = None
+        while code not in (READY_FOR_QUERY, ERROR_RESPONSE):
+            code, data_len = ci_unpack(self._read(5))
+            self.message_types[code](self._read(data_len - 4), None)
+        if self.error is not None:
+            raise self.error
 
         self.in_transaction = False
-        self.notifies = []
-        self.notifies_lock = threading.Lock()
 
     def handle_ERROR_RESPONSE(self, data, ps):
-        responses = tuple(
-            (s[0:1], s[1:].decode(self._client_encoding)) for s in
-            data.split(NULL_BYTE))
-        msg_dict = dict(responses)
-        if msg_dict[RESPONSE_CODE] == "28000":
-            self.error = InterfaceError("md5 password authentication failed")
+        msg = OrderedDict(
+            (s[:1], s[1:].decode(self._client_encoding)) for s in
+            data.split(NULL_BYTE) if s != b(''))
+        exc_args = itervalues(msg)
+        if msg[RESPONSE_CODE] == "28000":
+            self.error = InterfaceError(*exc_args)
         else:
-            self.error = ProgrammingError(*tuple(v for k, v in responses))
+            self.error = ProgrammingError(*exc_args)
 
     def handle_EMPTY_QUERY_RESPONSE(self, data, ps):
         self.error = ProgrammingError("query was empty")
@@ -1640,7 +1438,7 @@ class Connection(object):
         pass
 
     def handle_PORTAL_SUSPENDED(self, data, cursor):
-        cursor.portal_suspended = True
+        pass
 
     def handle_PARAMETER_DESCRIPTION(self, data, ps):
         # Well, we don't really care -- we're going to send whatever we
@@ -1672,7 +1470,6 @@ class Connection(object):
         # Int16(N) - Format codes for each column (0 text, 1 binary)
         is_binary, num_cols = bh_unpack(data)
         # column_formats = unpack_from('!' + 'h' * num_cols, data, 3)
-        assert self._lock.locked()
         if ps.stream is None:
             raise InterfaceError(
                 "An input stream is required for the COPY IN response.")
@@ -1703,7 +1500,6 @@ class Connection(object):
         self._flush()
 
     def handle_NOTIFICATION_RESPONSE(self, data, ps):
-        self.NotificationReceived(data)
         ##
         # A message sent if this connection receives a NOTIFY that it was
         # LISTENing for.
@@ -1719,9 +1515,7 @@ class Connection(object):
         null = data.find(NULL_BYTE, idx) - idx
         # additional_info = data[idx:idx + null]
 
-        # psycopg2 compatible notification interface
-        with self.notifies_lock:
-            self.notifies.append((backend_pid, condition))
+        self.notifications.append((backend_pid, condition))
 
     def cursor(self):
         """Creates a :class:`Cursor` object bound to this
@@ -1738,8 +1532,7 @@ class Connection(object):
         This function is part of the `DBAPI 2.0 specification
         <http://www.python.org/dev/peps/pep-0249/>`_.
         """
-        with self._lock:
-            self.execute(self._cursor, "commit", None)
+        self.execute(self._cursor, "commit", None)
 
     def rollback(self):
         """Rolls back the current database transaction.
@@ -1747,10 +1540,16 @@ class Connection(object):
         This function is part of the `DBAPI 2.0 specification
         <http://www.python.org/dev/peps/pep-0249/>`_.
         """
-        with self._lock:
-            self.execute(self._cursor, "rollback", None)
+        if not self.in_transaction:
+            return
+        self.execute(self._cursor, "rollback", None)
 
-    def _close(self):
+    def close(self):
+        """Closes the database connection.
+
+        This function is part of the `DBAPI 2.0 specification
+        <http://www.python.org/dev/peps/pep-0249/>`_.
+        """
         try:
             # Byte1('X') - Identifies the message as a terminate message.
             # Int32(4) - Message length, including self.
@@ -1761,29 +1560,19 @@ class Connection(object):
             raise InterfaceError("connection is closed")
         except ValueError:
             raise InterfaceError("connection is closed")
-        except socket.error as e:
-            raise OperationalError(str(e))
+        except socket.error:
+            pass
         finally:
             self._usock.close()
             self._sock = None
 
-    def close(self):
-        """Closes the database connection.
-
-        This function is part of the `DBAPI 2.0 specification
-        <http://www.python.org/dev/peps/pep-0249/>`_.
-        """
-        with self._lock:
-            self._close()
-
     def handle_AUTHENTICATION_REQUEST(self, data, cursor):
-        assert self._lock.locked()
         # Int32 -   An authentication code that represents different
         #           authentication messages:
         #               0 = AuthenticationOk
         #               5 = MD5 pwd
         #               2 = Kerberos v5 (not supported by pg8000)
-        #               3 = Cleartext pwd (not supported by pg8000)
+        #               3 = Cleartext pwd
         #               4 = crypt() pwd (not supported by pg8000)
         #               6 = SCM credential (not supported by pg8000)
         #               7 = GSSAPI (not supported by pg8000)
@@ -1800,8 +1589,7 @@ class Connection(object):
                 raise InterfaceError(
                     "server requesting password authentication, but no "
                     "password was provided")
-            self._send_message(
-                PASSWORD, self.password.encode("ascii") + NULL_BYTE)
+            self._send_message(PASSWORD, self.password + NULL_BYTE)
             self._flush()
         elif auth_code == 5:
             ##
@@ -1817,8 +1605,8 @@ class Connection(object):
                     "server requesting MD5 password authentication, but no "
                     "password was provided")
             pwd = b("md5") + md5(
-                md5(self.password.encode("ascii") + self.user).
-                hexdigest().encode("ascii") + salt).hexdigest().encode("ascii")
+                md5(self.password + self.user).hexdigest().encode("ascii") +
+                salt).hexdigest().encode("ascii")
             # Byte1('p') - Identifies the message as a password message.
             # Int32 - Message length including self.
             # String - The password.  Password may be encrypted.
@@ -1846,6 +1634,14 @@ class Connection(object):
             return self.py_types[1114]  # timestamp
         else:
             return self.py_types[1184]  # send as timestamptz
+
+    def inspect_int(self, value):
+        if min_int2 < value < max_int2:
+            return self.py_types[21]
+        if min_int4 < value < max_int4:
+            return self.py_types[23]
+        if min_int8 < value < max_int8:
+            return self.py_types[20]
 
     def make_params(self, values):
         params = []
@@ -1901,6 +1697,7 @@ class Connection(object):
             self.statement_number += 1
             statement_name_bin = statement_name.encode('ascii') + NULL_BYTE
             ps = {
+                'statement_name_bin': statement_name_bin,
                 'row_desc': [],
                 'param_funcs': tuple(x[2] for x in params),
             }
@@ -1940,8 +1737,6 @@ class Connection(object):
                     raise InterfaceError("connection is closed")
                 else:
                     raise e
-            except socket.error as e:
-                raise OperationalError(str(e))
 
             self.handle_messages(cursor)
 
@@ -1967,22 +1762,23 @@ class Connection(object):
             # Int16 - The number of result-column format codes.
             # For each result-column format code:
             #   Int16 - The format code.
-            ps['bind_1'] = statement_name_bin + h_pack(len(params)) + \
+            ps['bind_1'] = NULL_BYTE + statement_name_bin + \
+                h_pack(len(params)) + \
                 pack("!" + "h" * len(param_fcs), *param_fcs) + \
                 h_pack(len(params))
 
             ps['bind_2'] = h_pack(len(output_fc)) + \
                 pack("!" + "h" * len(output_fc), *output_fc)
 
+            if len(cache['ps']) > pg8000.max_prepared_statements:
+                for p in itervalues(cache['ps']):
+                    self.close_prepared_statement(p['statement_name_bin'])
+                cache['ps'].clear()
+
             cache['ps'][key] = ps
 
         cursor._cached_rows.clear()
         cursor._row_count = -1
-        cursor.portal_name = "pg8000_portal_" + str(self.portal_number)
-        self.portal_number += 1
-        cursor.portal_name_bin = cursor.portal_name.encode('ascii') + NULL_BYTE
-        cursor.execute_msg = cursor.portal_name_bin + \
-            Connection._row_cache_size_bin
 
         # Byte1('B') - Identifies the Bind command.
         # Int32 - Message length, including self.
@@ -2000,7 +1796,7 @@ class Connection(object):
         # Int16 - The number of result-column format codes.
         # For each result-column format code:
         #   Int16 - The format code.
-        retval = bytearray(cursor.portal_name_bin + ps['bind_1'])
+        retval = bytearray(ps['bind_1'])
         for value, send_func in zip(args, ps['param_funcs']):
             if value is None:
                 val = NULL
@@ -2015,15 +1811,6 @@ class Connection(object):
         self._write(SYNC_MSG)
         self._flush()
         self.handle_messages(cursor)
-        if cursor.portal_suspended:
-            if self.autocommit:
-                raise InterfaceError(
-                    "With autocommit on, it's not possible to retrieve more "
-                    "rows than the pg8000 cache size, as the portal is closed "
-                    "when the transaction is closed.")
-
-        else:
-            self.close_portal(cursor)
 
     def _send_message(self, code, data):
         try:
@@ -2046,8 +1833,8 @@ class Connection(object):
         # Int32 -   Maximum number of rows to return, if portal
         #           contains a query # that returns rows.
         #           0 = no limit.
-        cursor.portal_suspended = False
-        self._send_message(EXECUTE, cursor.execute_msg)
+        self._write(EXECUTE_MSG)
+        self._write(FLUSH_MSG)
 
     def handle_NO_DATA(self, msg, ps):
         pass
@@ -2063,8 +1850,10 @@ class Connection(object):
                 cursor._row_count += row_count
 
         if command in DDL_COMMANDS:
-            for k in self._caches:
-                self._caches[k]['ps'].clear()
+            for cache in itervalues(self._caches):
+                for ps in itervalues(cache['ps']):
+                    self.close_prepared_statement(ps['statement_name_bin'])
+                cache['ps'].clear()
 
     def handle_DATA_ROW(self, data, cursor):
         data_idx = 2
@@ -2082,13 +1871,9 @@ class Connection(object):
     def handle_messages(self, cursor):
         code = self.error = None
 
-        try:
-            while code != READY_FOR_QUERY:
-                code, data_len = ci_unpack(self._read(5))
-                self.message_types[code](self._read(data_len - 4), cursor)
-        except:
-            self._close()
-            raise
+        while code != READY_FOR_QUERY:
+            code, data_len = ci_unpack(self._read(5))
+            self.message_types[code](self._read(data_len - 4), cursor)
 
         if self.error is not None:
             raise self.error
@@ -2097,11 +1882,11 @@ class Connection(object):
     # Int32 - Message length, including self.
     # Byte1 - 'S' for prepared statement, 'P' for portal.
     # String - The name of the item to close.
-    def close_portal(self, cursor):
-        self._send_message(CLOSE, PORTAL + cursor.portal_name_bin)
+    def close_prepared_statement(self, statement_name_bin):
+        self._send_message(CLOSE, STATEMENT + statement_name_bin)
         self._write(SYNC_MSG)
         self._flush()
-        self.handle_messages(cursor)
+        self.handle_messages(self._cursor)
 
     # Byte1('N') - Identifier
     # Int32 - Message length
@@ -2109,12 +1894,13 @@ class Connection(object):
     #   Byte1 - code identifying the field type (see responseKeys)
     #   String - field value
     def handle_NOTICE_RESPONSE(self, data, ps):
-        resp = dict((s[0:1], s[1:]) for s in data.split(NULL_BYTE))
-        self.NoticeReceived(resp)
+        self.notices.append(
+            dict((s[0:1], s[1:]) for s in data.split(NULL_BYTE)))
 
     def handle_PARAMETER_STATUS(self, data, ps):
         pos = data.find(NULL_BYTE)
         key, value = data[:pos], data[pos + 1:-1]
+        self.parameter_statuses.append((key, value))
         if key == b("client_encoding"):
             encoding = value.decode("ascii").lower()
             self._client_encoding = pg_to_py_encodings.get(encoding, encoding)
@@ -2131,7 +1917,7 @@ class Connection(object):
 
                 self.py_types[Interval] = (
                     1186, FC_BINARY, interval_send_integer)
-                self.py_types[datetime.timedelta] = (
+                self.py_types[Timedelta] = (
                     1186, FC_BINARY, interval_send_integer)
                 self.pg_types[1186] = (FC_BINARY, interval_recv_integer)
             else:
@@ -2142,7 +1928,7 @@ class Connection(object):
 
                 self.py_types[Interval] = (
                     1186, FC_BINARY, interval_send_float)
-                self.py_types[datetime.timedelta] = (
+                self.py_types[Timedelta] = (
                     1186, FC_BINARY, interval_send_float)
                 self.pg_types[1186] = (FC_BINARY, interval_recv_float)
 
@@ -2158,69 +1944,69 @@ class Connection(object):
                     b("FETCH"), b("COPY"))
 
     def array_inspect(self, value):
-        # Check if array has any values.  If not, we can't determine the proper
-        # array oid.
+        # Check if array has any values. If empty, we can just assume it's an
+        # array of strings
         first_element = array_find_first_element(value)
         if first_element is None:
-            raise ArrayContentEmptyError("array has no values")
-
-        # supported array output
-        typ = type(first_element)
-
-        if issubclass(typ, integer_types):
-            # special int array support -- send as smallest possible array type
-            typ = integer_types
-            int2_ok, int4_ok, int8_ok = True, True, True
-            for v in array_flatten(value):
-                if v is None:
-                    continue
-                if min_int2 < v < max_int2:
-                    continue
-                int2_ok = False
-                if min_int4 < v < max_int4:
-                    continue
-                int4_ok = False
-                if min_int8 < v < max_int8:
-                    continue
-                int8_ok = False
-            if int2_ok:
-                array_oid = 1005  # INT2[]
-                oid, fc, send_func = (21, FC_BINARY, h_pack)
-            elif int4_ok:
-                array_oid = 1007  # INT4[]
-                oid, fc, send_func = (23, FC_BINARY, i_pack)
-            elif int8_ok:
-                array_oid = 1016  # INT8[]
-                oid, fc, send_func = (20, FC_BINARY, q_pack)
-            else:
-                raise ArrayContentNotSupportedError(
-                    "numeric not supported as array contents")
+            oid = 25
+            # Use binary ARRAY format to avoid having to properly
+            # escape text in the array literals
+            fc = FC_BINARY
+            array_oid = pg_array_types[oid]
         else:
-            try:
-                oid, fc, send_func = self.make_params((first_element,))[0]
+            # supported array output
+            typ = type(first_element)
 
-                # If unknown, assume it's a string array
-                if oid == 705:
-                    oid = 25
-                    # Use binary ARRAY format to avoid having to properly
-                    # escape text in the array literals
-                    fc = FC_BINARY
-                array_oid = pg_array_types[oid]
-            except KeyError:
-                raise ArrayContentNotSupportedError(
-                    "oid " + str(oid) + " not supported as array contents")
-            except NotSupportedError:
-                raise ArrayContentNotSupportedError(
-                    "type " + str(typ) + " not supported as array contents")
+            if issubclass(typ, integer_types):
+                # special int array support -- send as smallest possible array
+                # type
+                typ = integer_types
+                int2_ok, int4_ok, int8_ok = True, True, True
+                for v in array_flatten(value):
+                    if v is None:
+                        continue
+                    if min_int2 < v < max_int2:
+                        continue
+                    int2_ok = False
+                    if min_int4 < v < max_int4:
+                        continue
+                    int4_ok = False
+                    if min_int8 < v < max_int8:
+                        continue
+                    int8_ok = False
+                if int2_ok:
+                    array_oid = 1005  # INT2[]
+                    oid, fc, send_func = (21, FC_BINARY, h_pack)
+                elif int4_ok:
+                    array_oid = 1007  # INT4[]
+                    oid, fc, send_func = (23, FC_BINARY, i_pack)
+                elif int8_ok:
+                    array_oid = 1016  # INT8[]
+                    oid, fc, send_func = (20, FC_BINARY, q_pack)
+                else:
+                    raise ArrayContentNotSupportedError(
+                        "numeric not supported as array contents")
+            else:
+                try:
+                    oid, fc, send_func = self.make_params((first_element,))[0]
+
+                    # If unknown, assume it's a string array
+                    if oid == 705:
+                        oid = 25
+                        # Use binary ARRAY format to avoid having to properly
+                        # escape text in the array literals
+                        fc = FC_BINARY
+                    array_oid = pg_array_types[oid]
+                except KeyError:
+                    raise ArrayContentNotSupportedError(
+                        "oid " + str(oid) + " not supported as array contents")
+                except NotSupportedError:
+                    raise ArrayContentNotSupportedError(
+                        "type " + str(typ) +
+                        " not supported as array contents")
 
         if fc == FC_BINARY:
             def send_array(arr):
-                # check for homogenous array
-                for a, i, v in walk_array(arr):
-                    if not isinstance(v, (typ, type(None))):
-                        raise ArrayContentNotHomogenousError(
-                            "not all array elements are of type " + str(typ))
-
                 # check that all array dimensions are consistent
                 array_check_dimensions(arr)
 
@@ -2232,24 +2018,26 @@ class Connection(object):
                 for v in array_flatten(arr):
                     if v is None:
                         data += i_pack(-1)
-                    else:
+                    elif isinstance(v, typ):
                         inner_data = send_func(v)
                         data += i_pack(len(inner_data))
                         data += inner_data
+                    else:
+                        raise ArrayContentNotHomogenousError(
+                            "not all array elements are of type " + str(typ))
                 return data
         else:
             def send_array(arr):
-                for a, i, v in walk_array(arr):
-                    if not isinstance(v, (typ, type(None))):
-                        raise ArrayContentNotHomogenousError(
-                            "not all array elements are of type " + str(typ))
                 array_check_dimensions(arr)
                 ar = deepcopy(arr)
                 for a, i, v in walk_array(ar):
                     if v is None:
                         a[i] = 'NULL'
-                    else:
+                    elif isinstance(v, typ):
                         a[i] = send_func(v).decode('ascii')
+                    else:
+                        raise ArrayContentNotHomogenousError(
+                            "not all array elements are of type " + str(typ))
 
                 return u(str(ar)).translate(arr_trans).encode('ascii')
         return (array_oid, fc, send_array)
@@ -2384,6 +2172,7 @@ class Connection(object):
         finally:
             self.autocommit = previous_autocommit_mode
 
+
 # pg element oid -> pg array typeoid
 pg_array_types = {
     16: 1000,
@@ -2475,25 +2264,26 @@ def array_flatten(arr):
 
 
 def array_check_dimensions(arr):
-    v0 = arr[0]
-    if isinstance(v0, list):
-        req_len = len(v0)
-        req_inner_lengths = array_check_dimensions(v0)
-        for v in arr:
-            inner_lengths = array_check_dimensions(v)
-            if len(v) != req_len or inner_lengths != req_inner_lengths:
-                raise ArrayDimensionsNotConsistentError(
-                    "array dimensions not consistent")
-        retval = [req_len]
-        retval.extend(req_inner_lengths)
-        return retval
-    else:
-        # make sure nothing else at this level is a list
-        for v in arr:
-            if isinstance(v, list):
-                raise ArrayDimensionsNotConsistentError(
-                    "array dimensions not consistent")
-        return []
+    if len(arr) > 0:
+        v0 = arr[0]
+        if isinstance(v0, list):
+            req_len = len(v0)
+            req_inner_lengths = array_check_dimensions(v0)
+            for v in arr:
+                inner_lengths = array_check_dimensions(v)
+                if len(v) != req_len or inner_lengths != req_inner_lengths:
+                    raise ArrayDimensionsNotConsistentError(
+                        "array dimensions not consistent")
+            retval = [req_len]
+            retval.extend(req_inner_lengths)
+            return retval
+        else:
+            # make sure nothing else at this level is a list
+            for v in arr:
+                if isinstance(v, list):
+                    raise ArrayDimensionsNotConsistentError(
+                        "array dimensions not consistent")
+    return []
 
 
 def array_has_null(arr):
@@ -2504,10 +2294,11 @@ def array_has_null(arr):
 
 
 def array_dim_lengths(arr):
-    v0 = arr[0]
-    if isinstance(v0, list):
-        retval = [len(v0)]
-        retval.extend(array_dim_lengths(v0))
-    else:
-        return [len(arr)]
-    return retval
+    len_arr = len(arr)
+    if len_arr > 0:
+        v0 = arr[0]
+        if isinstance(v0, list):
+            retval = [len(v0)]
+            retval.extend(array_dim_lengths(v0))
+            return retval
+    return [len_arr]

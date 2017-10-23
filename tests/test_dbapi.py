@@ -3,7 +3,7 @@ import os
 import time
 import pg8000
 import datetime
-from .connection_settings import db_connect
+from connection_settings import db_connect
 from sys import exc_info
 from six import b
 from distutils.version import LooseVersion
@@ -264,18 +264,12 @@ class Tests(unittest.TestCase):
         finally:
             cursor.close()
 
-    # If autocommit is on and we do an operation that returns more rows than
-    # the cache holds, make sure exception raised.
-    def testAutocommitMaxRows(self):
-        self.db.autocommit = True
-        try:
-            cursor = self.db.cursor()
-            self.assertRaises(
-                pg8000.InterfaceError, cursor.execute,
-                "select generate_series(1, " +
-                str(pg8000.core.Connection._row_cache_size + 1) + ")")
-        finally:
-            cursor.close()
+    def testPreparedStatement(self):
+        cursor = self.db.cursor()
+        cursor.execute(
+            'PREPARE gen_series AS SELECT generate_series(1, 10);')
+        cursor.execute('EXECUTE gen_series')
+
 
 if __name__ == "__main__":
     unittest.main()

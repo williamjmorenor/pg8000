@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-from . import dbapi20
+import dbapi20
 import unittest
 import pg8000
-from .connection_settings import db_connect
+from connection_settings import db_connect
 
 
 class Tests(dbapi20.DatabaseAPI20Test):
@@ -17,6 +17,7 @@ class Tests(dbapi20.DatabaseAPI20Test):
 
     def test_setoutputsize(self):
         pass
+
 
 if __name__ == '__main__':
     unittest.main()
