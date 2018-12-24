@@ -34,6 +34,9 @@ setup(
     install_requires=[
         "six>=1.10.0",
     ],
+    tests_require = [
+    "pytz",
+    ],
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
