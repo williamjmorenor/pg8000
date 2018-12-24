@@ -9,12 +9,21 @@ python:
 env:
   - DB="9.5"
   - DB="9.6"
+  - DB="10"
 
 services:
   - postgresql
 addons:
   postgresql: "9.5"
   postgresql: "9.6"
+  postgresql: "10"
+  apt:
+    packages:
+    - postgresql-10
+    - postgresql-client-10
+env:
+  global:
+  - PGPORT=5432
 
 before_install:
   - sudo service postgresql stop
